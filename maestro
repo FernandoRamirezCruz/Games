@@ -1,0 +1,174 @@
+
+#include <esp_now.h>
+#include <WiFi.h>
+
+//////////////////////////////////////////////////////////////////////////
+// Definición de la estructura de mensaje que compartiremos con los esclavos
+//////////////////////////////////////////////////////////////////////////
+typedef struct {
+  int red;
+  int green;
+  int blue;
+  bool returnCommand; 
+  int slaveID; 
+} ColorMessage;
+
+//////////////////////////////////////////////////////////////////////////
+// Clase para representar un esclavo
+//////////////////////////////////////////////////////////////////////////
+class SlaveDevice {
+  private:
+    uint8_t macAddress[6];
+    int     slaveID;
+    
+  public:
+    // Constructor: recibe un array con la MAC y el ID
+    SlaveDevice(const uint8_t *mac, int id) {
+      memcpy(macAddress, mac, 6);
+      slaveID = id;
+    }
+
+    // Inicializa el peer en ESP-NOW (agrega el dispositivo a la lista de peers)
+    bool initPeer() {
+      esp_now_peer_info_t peerInfo = {};
+      memcpy(peerInfo.peer_addr, macAddress, 6);
+      peerInfo.channel = 0;
+      peerInfo.encrypt = false;
+      
+      if (esp_now_add_peer(&peerInfo) == ESP_OK) {
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    // Envía un color (o comando) al esclavo
+    void sendColor(int r, int g, int b, bool returnCmd = false) {
+      ColorMessage msg;
+      msg.red           = r;
+      msg.green         = g;
+      msg.blue          = b;
+      msg.returnCommand = returnCmd;
+      msg.slaveID       = slaveID;
+      
+      // Envía el struct por ESP-NOW
+      esp_now_send(macAddress, (uint8_t*)&msg, sizeof(msg));
+    }
+
+    // (Opcional) Getter del ID, si quieres usarlo en otras partes
+    int getID() {
+      return slaveID;
+    }
+};
+
+//////////////////////////////////////////////////////////////////////////
+// Variables globales
+//////////////////////////////////////////////////////////////////////////
+
+// Direcciones MAC de los esclavos (agrega o quita según necesites)
+uint8_t macSlave1[6] = {0xF0, 0xF5, 0xBD, 0xFD, 0x41, 0xA8};
+uint8_t macSlave2[6] = {0x64, 0xE8, 0x33, 0x87, 0xD3, 0x48};
+uint8_t macSlave3[6] = {0x3C, 0x84, 0x27, 0xAF, 0x0D, 0xD0};
+uint8_t macSlave4[6] = {0x3C, 0x84, 0x27, 0xAD, 0xC3, 0x9C};
+uint8_t macSlave5[6] = {0x18, 0x8B, 0x0E, 0x2A, 0xA3, 0x04};
+
+// Creamos objetos "SlaveDevice" para cada uno de los esclavos
+SlaveDevice slave1(macSlave1, 1);
+SlaveDevice slave2(macSlave2, 2);
+SlaveDevice slave3(macSlave3, 3);
+SlaveDevice slave4(macSlave4, 4);
+SlaveDevice slave5(macSlave5, 5);
+
+// Callback al enviar datos
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("Mensaje enviado a: ");
+  for (int i = 0; i < 6; i++) {
+    Serial.print(mac_addr[i], HEX);
+    if (i < 5) Serial.print(":");
+  }
+  Serial.print(" -> ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Éxito" : "Fallido");
+}
+
+// Callback al recibir datos
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+  // Se asume que el tamaño coincide con nuestra estructura
+  ColorMessage receivedData;
+  memcpy(&receivedData, incomingData, sizeof(receivedData));
+
+  Serial.print("Mensaje recibido de esclavo con ID: ");
+  Serial.print(receivedData.slaveID);
+  Serial.print(" | Color -> R: ");
+  Serial.print(receivedData.red);
+  Serial.print(" G: ");
+  Serial.print(receivedData.green);
+  Serial.print(" B: ");
+  Serial.print(receivedData.blue);
+  Serial.print(" | ReturnCommand: ");
+  Serial.println(receivedData.returnCommand ? "True" : "False");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Modo Station
+  WiFi.mode(WIFI_STA);
+
+  // Inicializar ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error al inicializar ESP-NOW");
+    return;
+  }
+
+  // Registrar los callbacks
+  esp_now_register_send_cb(OnDataSent);
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // Inicializamos cada esclavo agregándolo como "peer"
+  if (!slave1.initPeer()) Serial.println("Error al agregar peer 1");
+  if (!slave2.initPeer()) Serial.println("Error al agregar peer 2");
+  if (!slave3.initPeer()) Serial.println("Error al agregar peer 3");
+  if (!slave4.initPeer()) Serial.println("Error al agregar peer 4");
+  if (!slave5.initPeer()) Serial.println("Error al agregar peer 5");
+}
+
+void loop() {
+  // Leemos comandos por Serial
+  if (Serial.available() > 0) {
+    String command = Serial.readString();
+
+    // PONE TODO EN ROJO
+    if (command.startsWith("send")) {
+      int red   = 255;
+      int green = 0;
+      int blue  = 0;
+
+      // Enviamos a cada esclavo el color rojo
+      slave1.sendColor(red, green, blue);
+      slave2.sendColor(red, green, blue);
+      slave3.sendColor(red, green, blue);
+      slave4.sendColor(red, green, blue);
+      slave5.sendColor(red, green, blue);
+    }
+    // VUELVE AL COLOR ESTABLECIDO
+    else if (command.startsWith("return")) {
+      Serial.println("Restaurando color en los esclavos...");
+      
+      // El 'true' indica que es un "returnCommand"
+      slave1.sendColor(0, 0, 0, true);
+      slave2.sendColor(0, 0, 0, true);
+      slave3.sendColor(0, 0, 0, true);
+      slave4.sendColor(0, 0, 0, true);
+      slave5.sendColor(0, 0, 0, true);
+    }
+    // ENVIO DE COLORES INDIVIDUALES (sólo ejemplo)
+    else if (command.startsWith("tuti")) {
+      // Colores distintos para cada uno
+      slave1.sendColor(102,  51, 255);  // Violeta
+      slave2.sendColor(255,   0, 204);  // Fucsia
+      slave3.sendColor(255, 102,  51);  // Naranja
+      slave4.sendColor(100, 200,  50);  // (Ejemplo)
+      slave5.sendColor( 10,  10,  10);  // (Ejemplo)
+    }  
+  }
+}
